@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PanOptic-YOLO: Intelligent Identity Verification Engine</title>
+    
+    <!-- Premium Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Custom Style Sheet -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="glass-bg-decor decor-1"></div>
+    <div class="glass-bg-decor decor-2"></div>
+    
+    <div class="app-container">
+        <!-- Main Navigation Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <span class="logo-badge">AI</span>
+                <h1>PanOptic<span>YOLO</span></h1>
+            </div>
+            <div class="header-tagline">
+                Permanent Account Number (PAN) Document Auditor
+            </div>
+        </header>
+
+        <!-- Main Dashboard View -->
+        <main class="dashboard-grid">
+            <!-- Left Side: Control & Upload Zone -->
+            <section class="control-panel">
+                <div class="panel-card upload-card">
+                    <div class="card-header">
+                        <h2>📤 Document Ingestion</h2>
+                        <p>Upload a PAN card image in any standard format (JPEG, PNG, WEBP, BMP).</p>
+                    </div>
+                    
+                    <div class="upload-dropzone" id="dropzone">
+                        <input type="file" id="fileInput" accept="image/*" class="file-input-hidden">
+                        <div class="dropzone-content">
+                            <div class="upload-icon">🔍</div>
+                            <h3>Drag & drop your file here</h3>
+                            <p>or <span class="browse-link">browse files</span></p>
+                            <span class="file-format-badge">Any Image Format Accepted</span>
+                        </div>
+                    </div>
+                    
+                    <div class="upload-progress-bar-container" id="progressBarContainer">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                </div>
+
+                <!-- Step-by-Step Visualization Tabs -->
+                <div class="panel-card visualization-card hidden" id="vizCard">
+                    <div class="card-header border-bottom">
+                        <div class="tab-triggers">
+                            <button class="tab-btn active" data-tab="original">Original</button>
+                            <button class="tab-btn" data-tab="bgremoved">Isolated (rembg)</button>
+                            <button class="tab-btn" data-tab="detected">YOLOv8 BBoxes</button>
+                        </div>
+                    </div>
+                    
+                    <div class="tab-contents">
+                        <div class="tab-pane active" id="tab-original">
+                            <img src="" alt="Original PAN Document" class="img-preview" id="imgOriginal">
+                        </div>
+                        <div class="tab-pane" id="tab-bgremoved">
+                            <img src="" alt="Background Removed Document" class="img-preview" id="imgBgRemoved">
+                        </div>
+                        <div class="tab-pane" id="tab-detected">
+                            <img src="" alt="YOLOv8 Detected Features" class="img-preview" id="imgDetected">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Side: Parsing Results & Security Analytics -->
+            <section class="results-panel">
+                <!-- Status Badge -->
+                <div class="panel-card status-card hidden" id="statusCard">
+                    <div class="status-indicator" id="statusIndicator">
+                        <div class="status-icon" id="statusIcon">✓</div>
+                        <div class="status-details">
+                            <h3 id="statusTitle">Valid PAN Card Detected</h3>
+                            <p id="statusDescription">Document structural layout and format verified successfully.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Structured OCR Parser Outputs -->
+                <div class="panel-card ocr-card hidden" id="ocrCard">
+                    <div class="card-header">
+                        <h2>📝 Document Data Extraction</h2>
+                        <p>High-fidelity text isolated via Tesseract OCR classification.</p>
+                    </div>
+                    
+                    <div class="ocr-fields">
+                        <div class="form-group highlight">
+                            <label>💳 Permanent Account Number (PAN)</label>
+                            <input type="text" id="fieldPan" class="form-control" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>👤 Full Name</label>
+                            <input type="text" id="fieldName" class="form-control" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>👥 Father's Name</label>
+                            <input type="text" id="fieldFather" class="form-control" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>📅 Date of Birth</label>
+                            <input type="text" id="fieldDob" class="form-control" readonly>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Audits & Algorithmic Scores -->
+                <div class="panel-card metrics-card hidden" id="metricsCard">
+                    <div class="card-header">
+                        <h2>🔒 Forensic & Metric Analysis</h2>
+                        <p>Deep Learning layout verification & pixel integrity scores.</p>
+                    </div>
+                    
+                    <div class="metrics-grid">
+                        <!-- Metric 1: Cosine Similarity -->
+                        <div class="metric-block">
+                            <div class="metric-meta">
+                                <span>📐 BBox Cosine Similarity (Layout)</span>
+                                <strong id="valCosine">0.0%</strong>
+                            </div>
+                            <div class="progress-track">
+                                <div class="progress-fill fill-violet" id="fillCosine"></div>
+                            </div>
+                        </div>
+
+                        <!-- Metric 2: SSIM Index -->
+                        <div class="metric-block">
+                            <div class="metric-meta">
+                                <span>📊 SSIM Index (Structural Fidelity)</span>
+                                <strong id="valSsim">0.0000</strong>
+                            </div>
+                            <div class="progress-track">
+                                <div class="progress-fill fill-green" id="fillSsim"></div>
+                            </div>
+                        </div>
+
+                        <!-- Metric 3: Brightness Ratio -->
+                        <div class="metric-block">
+                            <div class="metric-meta">
+                                <span>☀️ Brightness (Original vs isolated)</span>
+                                <span id="valBrightness">Original: 0 | Isolated: 0</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Metric 4: YOLOv8 Bounding Boxes Detected -->
+                        <div class="metric-block">
+                            <div class="metric-meta">
+                                <span>🛰️ Detected Anchors</span>
+                                <div class="badge-row" id="badgeRow">
+                                    <!-- Badges injected dynamically -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Raw Metadata Payload -->
+                <div class="panel-card payload-card hidden" id="payloadCard">
+                    <div class="card-header flex-header">
+                        <h2>💾 Forensic JSON Payload</h2>
+                        <button class="btn-action" id="btnCopyJson">Copy Payload</button>
+                    </div>
+                    <div class="code-wrapper">
+                        <pre><code id="jsonCode" class="json-code">{}</code></pre>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="app-footer">
+            <p>Built with YOLOv8, PyTesseract, OpenCV, Flask and Vanilla CSS. Designed to wow developers.</p>
+        </footer>
+    </div>
+
+    <!-- Core Scripting Logic -->
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

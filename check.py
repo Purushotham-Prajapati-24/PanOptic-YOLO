@@ -6,9 +6,18 @@ import easygui
 from sklearn.metrics.pairwise import cosine_similarity
 import pytesseract
 import re
+import os
 
-# Specify the Tesseract executable path
-pytesseract.pytesseract.tesseract_cmd = r'C:/Program Files/Tesseract-OCR/tesseract.exe'  # Adjust this path accordingly
+# Base directory of the script for robust pathing
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Configure Tesseract path gracefully
+DEFAULT_TESSERACT_PATH = r'C:/Program Files/Tesseract-OCR/tesseract.exe'
+if os.path.exists(DEFAULT_TESSERACT_PATH):
+    pytesseract.pytesseract.tesseract_cmd = DEFAULT_TESSERACT_PATH
+else:
+    # Try looking in standard system path, otherwise log a warning
+    print("Warning: Tesseract OCR executable not found at standard path. OCR features may fail if not globally registered.")
 
 def get_detected_objects(image, model, threshold=0.4):
     results = model(image)[0]
@@ -50,20 +59,23 @@ def are_objects_similar(user_obj, template_obj):
     return class_similarity > class_similarity_threshold and position_similarity > position_similarity_threshold
 
 def extract_text_and_draw_boxes(image):
-    # Use pytesseract to perform OCR and get detailed information
-    data = pytesseract.image_to_data(image, config='--psm 6', output_type=pytesseract.Output.DICT)
+    try:
+        # Use pytesseract to perform OCR and get detailed information
+        data = pytesseract.image_to_data(image, config='--psm 6', output_type=pytesseract.Output.DICT)
+        for i in range(len(data['text'])):
+            x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+            confidence = int(data['conf'][i])
+            text = data['text'][i]
 
-    for i in range(len(data['text'])):
-        x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
-        confidence = int(data['conf'][i])
-        text = data['text'][i]
-
-        # Filter out low-confidence detections and non-rectangular bounding boxes
-        if confidence > 60 and w > 5 and h > 5 and w / h > 0.2:
-            cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            print(f"Text: {text}, Confidence: {confidence}, Bounding Box: ({x}, {y}, {x + w}, {y + h})")
-
-    return image, data
+            # Filter out low-confidence detections and non-rectangular bounding boxes
+            if confidence > 60 and w > 5 and h > 5 and w / h > 0.2:
+                cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                print(f"Text: {text}, Confidence: {confidence}, Bounding Box: ({x}, {y}, {x + w}, {y + h})")
+        return image, data
+    except Exception as e:
+        print(f"OCR Error: {e}. Falling back to empty text structure.")
+        # Graceful fallback so program doesn't crash if Tesseract is not installed
+        return image, {'text': [], 'conf': [], 'left': [], 'top': [], 'width': [], 'height': []}
 
 def is_pan_number(text):
     # Using a regular expression to match the pattern 'ABCDE1234F'
@@ -71,6 +83,10 @@ def is_pan_number(text):
     return re.match(pan_pattern, text) is not None
 
 def display_text_with_boxes(image, data):
+    if not data['text']:
+        print("No text data to display.")
+        return
+
     for i in range(len(data['text'])):
         x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
         confidence = int(data['conf'][i])
@@ -86,55 +102,74 @@ def display_text_with_boxes(image, data):
     plt.title('Result with Text and Bounding Boxes')
     plt.show()
 
+# Resolve correct paths dynamically
+def get_path(filename):
+    # Check directly in script directory
+    direct_path = os.path.join(BASE_DIR, filename)
+    if os.path.exists(direct_path):
+        return direct_path
+    
+    # Check in a subfolder called "PAN" if running from parent dir
+    pan_subfolder_path = os.path.join(BASE_DIR, "PAN", filename)
+    if os.path.exists(pan_subfolder_path):
+        return pan_subfolder_path
+        
+    return direct_path
+
 # Load the user-input image
-user_input_path = 'PAN/bgremoved.jpg'
+user_input_path = get_path('bgremoved.jpg')
 user_input_image = cv2.imread(user_input_path)
 
 # Load the template image
-template_path = 'PAN/pan.jpg'
+template_path = get_path('pan.jpg')
 template_image = cv2.imread(template_path)
 
-# Load a YOLOv5 model
-model_path = 'PAN/best (5).pt'
-model = YOLO(model_path)
+# Load a YOLOv8 model
+model_path = get_path('best (5).pt')
 
-# Get detected objects for user-input image and template image
-user_input_objects = get_detected_objects(user_input_image, model)
-template_objects = get_detected_objects(template_image, model)
-
-# Compare detected objects
-similar_objects_count = 0
-
-for user_obj in user_input_objects:
-    for template_obj in template_objects:
-        if are_objects_similar(user_obj, template_obj):
-            print(f"Similar object detected: {user_obj['class']} at relative coordinates {user_obj['relative_coordinates']}")
-            similar_objects_count += 1
-
-# Save the output image with bounding boxes for user input
-for user_obj in user_input_objects:
-    x1, y1, x2, y2 = (
-        int(user_obj['relative_coordinates']['x1'] * user_input_image.shape[1]),
-        int(user_obj['relative_coordinates']['y1'] * user_input_image.shape[0]),
-        int(user_obj['relative_coordinates']['x2'] * user_input_image.shape[1]),
-        int(user_obj['relative_coordinates']['y2'] * user_input_image.shape[0])
-    )
-    cv2.rectangle(user_input_image, (x1, y1), (x2, y2), (0, 255, 0), 4)
-
-# Display the final user-input image if more than half of the classes are similar
-if similar_objects_count > len(user_input_objects) / 2:
-    # Extract text and draw boxes
-    user_input_image, text_data = extract_text_and_draw_boxes(user_input_image)
-
-    # Check if PAN number is detected
-    for i in range(len(text_data['text'])):
-        text = text_data['text'][i]
-        if is_pan_number(text):
-            print(f"PAN Number Detected: {text}")
-
-    # Display the result with text and bounding boxes
-    display_text_with_boxes(user_input_image, text_data)
-    print("Pan Card Detected")
+if not os.path.exists(user_input_path) or not os.path.exists(template_path) or not os.path.exists(model_path):
+    print("Error: Missing critical assets. Ensure 'bgremoved.jpg', 'pan.jpg', and 'best (5).pt' exist in the script directory.")
 else:
-    print("Not a Pan Card")
+    model = YOLO(model_path)
+
+    # Get detected objects for user-input image and template image
+    user_input_objects = get_detected_objects(user_input_image, model)
+    template_objects = get_detected_objects(template_image, model)
+
+    # Compare detected objects
+    similar_objects_count = 0
+
+    for user_obj in user_input_objects:
+        for template_obj in template_objects:
+            if are_objects_similar(user_obj, template_obj):
+                print(f"Similar object detected: {user_obj['class']} at relative coordinates {user_obj['relative_coordinates']}")
+                similar_objects_count += 1
+
+    # Save the output image with bounding boxes for user input
+    for user_obj in user_input_objects:
+        x1, y1, x2, y2 = (
+            int(user_obj['relative_coordinates']['x1'] * user_input_image.shape[1]),
+            int(user_obj['relative_coordinates']['y1'] * user_input_image.shape[0]),
+            int(user_obj['relative_coordinates']['x2'] * user_input_image.shape[1]),
+            int(user_obj['relative_coordinates']['y2'] * user_input_image.shape[0])
+        )
+        cv2.rectangle(user_input_image, (x1, y1), (x2, y2), (0, 255, 0), 4)
+
+    # Display the final user-input image if more than half of the classes are similar
+    if len(user_input_objects) > 0 and similar_objects_count > len(user_input_objects) / 2:
+        # Extract text and draw boxes
+        user_input_image, text_data = extract_text_and_draw_boxes(user_input_image)
+
+        # Check if PAN number is detected
+        for i in range(len(text_data['text'])):
+            text = text_data['text'][i]
+            if is_pan_number(text):
+                print(f"PAN Number Detected: {text}")
+
+        # Display the result with text and bounding boxes
+        display_text_with_boxes(user_input_image, text_data)
+        print("Pan Card Detected")
+    else:
+        print("Not a Pan Card or structural layout similarity threshold not met.")
+
  

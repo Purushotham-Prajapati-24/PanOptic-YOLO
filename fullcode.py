@@ -10,6 +10,29 @@ import os
 from ultralytics import YOLO
 import re
 
+# Base directory of the script for robust pathing
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Configure Tesseract path gracefully
+DEFAULT_TESSERACT_PATH = r'C:/Program Files/Tesseract-OCR/tesseract.exe'
+if os.path.exists(DEFAULT_TESSERACT_PATH):
+    pytesseract.pytesseract.tesseract_cmd = DEFAULT_TESSERACT_PATH
+else:
+    print("Warning: Tesseract OCR executable not found at standard path. OCR features may fail if not globally registered.")
+
+def get_path(filename):
+    # Check directly in script directory
+    direct_path = os.path.join(BASE_DIR, filename)
+    if os.path.exists(direct_path):
+        return direct_path
+    
+    # Check in a subfolder called "PAN" if running from parent dir
+    pan_subfolder_path = os.path.join(BASE_DIR, "PAN", filename)
+    if os.path.exists(pan_subfolder_path):
+        return pan_subfolder_path
+        
+    return direct_path
+
 def calculate_brightness(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     average_brightness = np.mean(gray)
@@ -29,7 +52,6 @@ def calculate_hsd_feature(input_image, ground_truth_image, num_bins):
     
     # Resize the ground truth image to match the dimensions of the input image
     ground_truth_resized = cv2.resize(ground_truth_image, (input_image.shape[1], input_image.shape[0]))
-
     ground_truth_hsv = cv2.cvtColor(ground_truth_resized, cv2.COLOR_BGR2HSV)
 
     # Split the HSV channels
@@ -61,10 +83,18 @@ def remove_background_rembg(image_path):
     output_image = remove(input_image)
     output_np = np.array(output_image)
 
-    if output_np.shape[2] == 4 and np.all(output_np[:, :, 3] == 255):
-        return cv2.imread(image_path)
-    else:
-        return output_np
+    # Convert transparent areas to white/keep raw BGR if no alpha channel
+    if output_np.shape[2] == 4:
+        # If fully opaque, return original BGR
+        if np.all(output_np[:, :, 3] == 255):
+            return cv2.imread(image_path)
+        else:
+            # Mask transparent background to white BGR
+            trans_mask = output_np[:, :, 3] == 0
+            bgr = cv2.cvtColor(output_np, cv2.COLOR_RGBA2BGR)
+            bgr[trans_mask] = [255, 255, 255]
+            return bgr
+    return output_np
 
 def apply_contours(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -81,6 +111,9 @@ def apply_contours(image):
     # Filter contours based on area to exclude small contours
     min_contour_area = 1000
     contours = [cnt for cnt in contours if cv2.contourArea(cnt) > min_contour_area]
+
+    if not contours:
+        return image, []
 
     # Approximate contours to reduce the number of points
     epsilon = 0.02 * cv2.arcLength(contours[0], True)
@@ -102,18 +135,17 @@ def display_hue_saturation_images(image):
     hue, saturation, _ = cv2.split(hsv_image)
 
     plt.figure(figsize=(12, 4))
-
     plt.subplot(1, 3, 1), plt.imshow(hue, cmap='hsv'), plt.title('Hue')
     plt.subplot(1, 3, 2), plt.imshow(saturation, cmap='hsv'), plt.title('Saturation')
     plt.subplot(1, 3, 3), plt.imshow(image), plt.title('Original Image with Contours')
-
     plt.show()
 
 def extract_text_and_draw_boxes(image):
-    # Use pytesseract to perform OCR and get detailed information
-    data = pytesseract.image_to_data(image, config='--psm 6', output_type=pytesseract.Output.DICT)
+    try:
+        # Use pytesseract to perform OCR and get detailed information
+        data = pytesseract.image_to_data(image, config='--psm 6', output_type=pytesseract.Output.DICT)
 
-    for i in range(len(data['text'])):
+        for i in range(len(data['text'])):
             x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
             confidence = int(data['conf'][i])
             text = data['text'][i]
@@ -122,7 +154,10 @@ def extract_text_and_draw_boxes(image):
             if confidence > 60 and w > 5 and h > 5 and w / h > 0.2:
                 cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 print(f"Text: {text}, Confidence: {confidence}, Bounding Box: ({x}, {y}, {x + w}, {y + h})")
-    return image, data
+        return image, data
+    except Exception as e:
+        print(f"OCR Error: {e}. Falling back to empty text structure.")
+        return image, {'text': [], 'conf': [], 'left': [], 'top': [], 'width': [], 'height': []}
 
 def is_pan_number(text):
     # Using a regular expression to match the pattern 'ABCDE1234F'
@@ -130,6 +165,9 @@ def is_pan_number(text):
     return re.match(pan_pattern, text) is not None
 
 def display_text_with_boxes(image, data):
+    if not data['text']:
+        return
+
     for i in range(len(data['text'])):
         x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
         confidence = int(data['conf'][i])
@@ -145,111 +183,115 @@ def display_text_with_boxes(image, data):
     plt.title('Result with Text and Bounding Boxes')
     plt.show()
 
-# Select the input image file using a file dialog
-input_path = easygui.fileopenbox(title='Select image file')
-ground_truth_path = easygui.fileopenbox(title='Select ground truth image file')
+# Main processing block (only runs when executed directly, not imported in Web UI)
+if __name__ == "__main__":
+    print("Select files via file dialogs...")
+    input_path = easygui.fileopenbox(title='Select image file')
+    ground_truth_path = easygui.fileopenbox(title='Select ground truth image file')
 
-# Remove background using rembg
-result_rembg = remove_background_rembg(input_path)
+    if not input_path or not ground_truth_path:
+        print("Selection cancelled. Exiting.")
+    else:
+        # Remove background using rembg
+        result_rembg = remove_background_rembg(input_path)
 
-# Calculate brightness of the original and processed images
-brightness_original = calculate_brightness(cv2.imread(input_path))
-brightness_processed = calculate_brightness(result_rembg)
+        # Calculate brightness of the original and processed images
+        brightness_original = calculate_brightness(cv2.imread(input_path))
+        brightness_processed = calculate_brightness(result_rembg)
 
-# Plot the grayscale histogram
-plot_grayscale_histogram(result_rembg)
+        # Plot the grayscale histogram
+        plot_grayscale_histogram(result_rembg)
 
-# Apply contours to the processed image
-result_with_contours, contours = apply_contours(result_rembg)
+        # Apply contours to the processed image
+        result_with_contours, contours = apply_contours(result_rembg)
 
-# Display brightness information
-print(f"Original Image Brightness: {brightness_original}")
-print(f"Processed Image Brightness: {brightness_processed}")
+        # Display brightness information
+        print(f"Original Image Brightness: {brightness_original}")
+        print(f"Processed Image Brightness: {brightness_processed}")
 
-# Display Hue and Saturation images
-display_hue_saturation_images(result_rembg)
+        # Display Hue and Saturation images
+        display_hue_saturation_images(result_rembg)
 
-# Display the original image
-plt.figure(figsize=(5, 5))
-plt.imshow(cv2.cvtColor(cv2.imread(input_path), cv2.COLOR_BGR2RGB))
-plt.title('Original Image')
-plt.show()
+        # Display the original image
+        plt.figure(figsize=(5, 5))
+        plt.imshow(cv2.cvtColor(cv2.imread(input_path), cv2.COLOR_BGR2RGB))
+        plt.title('Original Image')
+        plt.show()
 
-# Display the background-removed image
-plt.figure(figsize=(5, 5))
-plt.imshow(cv2.cvtColor(result_rembg, cv2.COLOR_BGR2RGB))
-plt.title('Background Removed')
-plt.show()
+        # Display the background-removed image
+        plt.figure(figsize=(5, 5))
+        plt.imshow(cv2.cvtColor(result_rembg, cv2.COLOR_BGR2RGB))
+        plt.title('Background Removed')
+        plt.show()
 
-# Display the result with contours
-plt.figure(figsize=(5, 5))
-plt.imshow(result_with_contours)
-plt.title('Result with Contours')
-plt.show()
+        # Display the result with contours
+        plt.figure(figsize=(5, 5))
+        plt.imshow(result_with_contours)
+        plt.title('Result with Contours')
+        plt.show()
 
-# Extract text and draw bounding boxes
-result_with_text, text_data = extract_text_and_draw_boxes(result_rembg)
+        # Extract text and draw bounding boxes
+        result_with_text, text_data = extract_text_and_draw_boxes(result_rembg)
 
-# Display result with text and bounding boxes
-display_text_with_boxes(result_with_text, text_data)
+        # Display result with text and bounding boxes
+        display_text_with_boxes(result_with_text, text_data)
 
-# Display contours only
-plt.figure(figsize=(5, 5))
-plt.imshow(cv2.drawContours(result_rembg.copy(), contours, -1, (0, 255, 0), 5))
-plt.title('Contours Only')
-plt.show()
+        # Display contours only
+        if contours:
+            plt.figure(figsize=(5, 5))
+            plt.imshow(cv2.drawContours(result_rembg.copy(), contours, -1, (0, 255, 0), 5))
+            plt.title('Contours Only')
+            plt.show()
 
-# Calculate structural similarity score
-gray_original = cv2.cvtColor(cv2.imread(input_path), cv2.COLOR_BGR2GRAY)
-gray_processed = cv2.cvtColor(result_rembg, cv2.COLOR_BGR2GRAY)
-score, _ = ssim(gray_original, gray_processed, full=True)
-print(f'Structural Similarity Score: {score:.4f}')
+        # Calculate structural similarity score
+        gray_original = cv2.cvtColor(cv2.imread(input_path), cv2.COLOR_BGR2GRAY)
+        gray_processed = cv2.cvtColor(result_rembg, cv2.COLOR_BGR2GRAY)
+        score, _ = ssim(gray_original, gray_processed, full=True)
+        print(f'Structural Similarity Score: {score:.4f}')
 
-# Calculate HSD feature vector
-num_bins = 8
-feature_vector = calculate_hsd_feature(result_rembg, cv2.imread(ground_truth_path), num_bins)
-print('HSD Feature Vector:')
-print(feature_vector)
+        # Calculate HSD feature vector
+        num_bins = 8
+        feature_vector = calculate_hsd_feature(result_rembg, cv2.imread(ground_truth_path), num_bins)
+        print('HSD Feature Vector:')
+        print(feature_vector)
 
-# YOLOv5 Detection
-image_path = 'image/cards (3).jpg'
-OUTPUT_DIR = os.path.join('.', 'validates')
-output_image_path = os.path.join(OUTPUT_DIR, 'output.jpg')
+        # YOLOv8 Detection
+        model_path = get_path('best (5).pt')
+        if os.path.exists(model_path):
+            OUTPUT_DIR = os.path.join(BASE_DIR, 'validates')
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+            output_image_path = os.path.join(OUTPUT_DIR, 'output.jpg')
 
-# Load an image
-oframe = cv2.imread(image_path)
-frame = cv2.resize(oframe, (420, 640))
-H, W, _ = frame.shape
+            # Load an image
+            oframe = cv2.imread(input_path)
+            frame = cv2.resize(oframe, (420, 640))
+            H, W, _ = frame.shape
 
-model_path = 'validate\\best (5).pt'
+            # Load a model
+            model = YOLO(model_path)
+            threshold = 0.4
+            results = model(frame)[0]
 
-# Load a model
-model = YOLO(model_path)
+            # List to track detected classes
+            detected_classes = []
+            print(results.boxes.data.tolist())
+            for result in results.boxes.data.tolist():
+                x1, y1, x2, y2, score, class_id = result
 
-threshold = 0.4
+                if score > threshold:
+                    detected_classes.append(results.names[int(class_id)])
+                    cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 4)
+                    cv2.putText(frame, results.names[int(class_id)].upper(), (int(x1), int(y1 - 10)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 0), 3, cv2.LINE_AA)
 
-results = model(frame)[0]
+                    # Print information for each detected box
+                    print("Detected:", results.names[int(class_id)], " with confidence:", score)
 
-# List to track detected classes
-detected_classes = []
-print(results.boxes.data.tolist())
-for result in results.boxes.data.tolist():
-    x1, y1, x2, y2, score, class_id = result
+            # Save the output image
+            cv2.imwrite(output_image_path, frame)
 
-    if score > threshold:
-        detected_classes.append(results.names[int(class_id)])
-        cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 4)
-        cv2.putText(frame, results.names[int(class_id)].upper(), (int(x1), int(y1 - 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 0), 3, cv2.LINE_AA)
-
-        # Print information for each detected box
-        print("Detected:", results.names[int(class_id)], " with confidence:", score)
-
-# Save the output image
-cv2.imwrite(output_image_path, frame)
-
-# Display the final YOLOv5 result
-plt.figure(figsize=(8, 8))
-plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-plt.title('YOLOv5 Result')
-plt.show()
+            # Display the final YOLOv8 result
+            plt.figure(figsize=(8, 8))
+            plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            plt.title('YOLOv8 Result')
+            plt.show()
