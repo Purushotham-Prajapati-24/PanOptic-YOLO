@@ -112,7 +112,7 @@ def compare_layouts(user_objects, template_objects, user_w, user_h, temp_w, temp
     # Return similarity ratio
     return float(similar_count / len(template_objects)) if template_objects else 0.0
 
-def extract_ocr_data(image):
+def extract_ocr_data(image, detected_objects=None):
     extracted_text = {}
     
     # Try calling Tesseract OCR
@@ -122,16 +122,35 @@ def extract_ocr_data(image):
         
         extracted_text['raw'] = lines
         
-        # Regex search for Indian PAN Card pattern (5 uppercase letters, 4 digits, 1 uppercase letter)
-        pan_regex = r'[A-Z]{5}\d{4}[A-Z]'
-        pan_matches = re.findall(pan_regex, raw_text, re.IGNORECASE)
-        if pan_matches:
-            extracted_text['pan_number'] = pan_matches[0].upper()
-        else:
-            # Fallback for OCR errors or fake/testing PANs (10 alphanumeric chars)
-            fallback_matches = re.findall(r'\b[A-Z0-9]{10}\b', raw_text, re.IGNORECASE)
-            if fallback_matches:
-                extracted_text['pan_number'] = fallback_matches[0].upper()
+        # Attempt to extract PAN specifically from YOLO bounding box if available
+        if detected_objects:
+            pan_box = next((obj for obj in detected_objects if obj['class'] == 'panNo'), None)
+            if pan_box:
+                x1, y1, x2, y2 = pan_box['coordinates']
+                # Add slight padding
+                h, w, _ = image.shape
+                px1, py1 = max(0, x1 - 5), max(0, y1 - 5)
+                px2, py2 = min(w, x2 + 5), min(h, y2 + 5)
+                pan_crop = image[py1:py2, px1:px2]
+                try:
+                    pan_text = pytesseract.image_to_string(pan_crop, config='--psm 7').strip()
+                    pan_cleaned = re.sub(r'[^A-Z0-9]', '', pan_text.upper())
+                    if len(pan_cleaned) >= 10:
+                        extracted_text['pan_number'] = pan_cleaned[:10]
+                except:
+                    pass
+
+        # Fallback to full-text regex search if YOLO crop failed
+        if 'pan_number' not in extracted_text:
+            pan_regex = r'[A-Z]{5}\d{4}[A-Z]'
+            pan_matches = re.findall(pan_regex, raw_text, re.IGNORECASE)
+            if pan_matches:
+                extracted_text['pan_number'] = pan_matches[0].upper()
+            else:
+                fallback_matches = re.findall(r'\b[A-Z0-9]{10}\b', raw_text, re.IGNORECASE)
+                valid_fallbacks = [m for m in fallback_matches if any(c.isdigit() for c in m)]
+                if valid_fallbacks:
+                    extracted_text['pan_number'] = valid_fallbacks[0].upper()
             
         # Extract potential DOB (DD/MM/YYYY or YYYY-MM-DD)
         dob_regex = r'(\d{2}[/.\-]\d{2}[/.\-]\d{4}|\d{4}[/.\-]\d{2}[/.\-]\d{2})'
@@ -241,8 +260,8 @@ def upload():
             is_valid_pan = True
             similarity_score = 0.75
 
-    # 5. Extract OCR Data
-    ocr_results = extract_ocr_data(original_cv)
+    # 5. Extract OCR Data (Pass detected_objects for targeted YOLO bboxes)
+    ocr_results = extract_ocr_data(original_cv, detected_objects)
     
     # Extra validation check for PAN structure
     extracted_pan = ocr_results.get('pan_number', None)
