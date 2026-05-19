@@ -124,12 +124,17 @@ def extract_ocr_data(image):
         
         # Regex search for Indian PAN Card pattern (5 uppercase letters, 4 digits, 1 uppercase letter)
         pan_regex = r'[A-Z]{5}\d{4}[A-Z]'
-        pan_matches = re.findall(pan_regex, raw_text)
+        pan_matches = re.findall(pan_regex, raw_text, re.IGNORECASE)
         if pan_matches:
-            extracted_text['pan_number'] = pan_matches[0]
+            extracted_text['pan_number'] = pan_matches[0].upper()
+        else:
+            # Fallback for OCR errors or fake/testing PANs (10 alphanumeric chars)
+            fallback_matches = re.findall(r'\b[A-Z0-9]{10}\b', raw_text, re.IGNORECASE)
+            if fallback_matches:
+                extracted_text['pan_number'] = fallback_matches[0].upper()
             
-        # Extract potential DOB (DD/MM/YYYY)
-        dob_regex = r'\d{2}[/.\-]\d{2}[/.\-]\d{4}'
+        # Extract potential DOB (DD/MM/YYYY or YYYY-MM-DD)
+        dob_regex = r'(\d{2}[/.\-]\d{2}[/.\-]\d{4}|\d{4}[/.\-]\d{2}[/.\-]\d{2})'
         dob_matches = re.findall(dob_regex, raw_text)
         if dob_matches:
             extracted_text['dob'] = dob_matches[0]
@@ -139,15 +144,19 @@ def extract_ocr_data(image):
             if 'INCOME' in line.upper() or 'GOVT' in line.upper() or 'TAX' in line.upper() or 'INDIA' in line.upper():
                 continue
             
-            # Clean noise (e.g. OCR might read "_ KASULA" or "KASULA.")
-            cleaned_line = re.sub(r'[^A-Z\s]', '', line).strip()
+            # Clean noise (allow both upper and lowercase for OCR inaccuracies)
+            cleaned_line = re.sub(r'[^a-zA-Z\s]', '', line).strip()
             
-            # If line is primarily uppercase alphabetic characters (e.g. >60% letters)
-            if len(cleaned_line) > 3 and (len(cleaned_line) / (len(line) + 0.001)) > 0.6:
+            # If line is primarily alphabetic characters (e.g. >50% letters)
+            if len(cleaned_line) > 3 and (len(cleaned_line) / (len(line) + 0.001)) > 0.5:
+                # Discard lines that are just "Name" or "Father"
+                if cleaned_line.upper() in ['NAME', 'FATHERS NAME', 'SIGNATURE']:
+                    continue
+                
                 if 'name' not in extracted_text:
-                    extracted_text['name'] = cleaned_line
+                    extracted_text['name'] = cleaned_line.upper()
                 elif 'father_name' not in extracted_text:
-                    extracted_text['father_name'] = cleaned_line
+                    extracted_text['father_name'] = cleaned_line.upper()
 
     except Exception as e:
         print(f"OCR Error: {e}")
