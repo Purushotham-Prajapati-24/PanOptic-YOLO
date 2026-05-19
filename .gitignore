@@ -65,3 +65,5 @@ Desktop.ini
 # Output directories
 validates/output.jpg
 validates/
+
+static/uploads/

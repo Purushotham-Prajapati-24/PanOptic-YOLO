@@ -129,21 +129,25 @@ def extract_ocr_data(image):
             extracted_text['pan_number'] = pan_matches[0]
             
         # Extract potential DOB (DD/MM/YYYY)
-        dob_regex = r'\b\d{2}/\d{2}/\d{4}\b'
+        dob_regex = r'\d{2}[/.\-]\d{2}[/.\-]\d{4}'
         dob_matches = re.findall(dob_regex, raw_text)
         if dob_matches:
             extracted_text['dob'] = dob_matches[0]
 
         # Extract name heuristics
         for line in lines:
-            if 'INCOME TAX' in line.upper() or 'GOVT' in line.upper() or 'INDIA' in line.upper():
+            if 'INCOME' in line.upper() or 'GOVT' in line.upper() or 'TAX' in line.upper() or 'INDIA' in line.upper():
                 continue
-            # Usually Name is one of the early uppercase blocks
-            if re.match(r'^[A-Z\s]+$', line) and len(line) > 3 and 'pan_number' not in extracted_text:
+            
+            # Clean noise (e.g. OCR might read "_ KASULA" or "KASULA.")
+            cleaned_line = re.sub(r'[^A-Z\s]', '', line).strip()
+            
+            # If line is primarily uppercase alphabetic characters (e.g. >60% letters)
+            if len(cleaned_line) > 3 and (len(cleaned_line) / (len(line) + 0.001)) > 0.6:
                 if 'name' not in extracted_text:
-                    extracted_text['name'] = line
+                    extracted_text['name'] = cleaned_line
                 elif 'father_name' not in extracted_text:
-                    extracted_text['father_name'] = line
+                    extracted_text['father_name'] = cleaned_line
 
     except Exception as e:
         print(f"OCR Error: {e}")
@@ -229,7 +233,7 @@ def upload():
             similarity_score = 0.75
 
     # 5. Extract OCR Data
-    ocr_results = extract_ocr_data(bg_removed)
+    ocr_results = extract_ocr_data(original_cv)
     
     # Extra validation check for PAN structure
     extracted_pan = ocr_results.get('pan_number', None)
